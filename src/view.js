@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { CELL, HALL, STORY } from './gen.js';
 import { ELEMENT_COLOR } from './data.js';
+import { portraitCanvas } from './icons.js';
+import { metalCanvas, woodCanvas } from './materials.js';
 
 function stoneTexture(kind) {
   const c = document.createElement('canvas');
@@ -60,7 +62,7 @@ export class WorldView {
     this.weapon = new THREE.Group();
     this.camera.add(this.weapon);
     this.form = 'sword';
-    this.setWeapon('sword', '#f2f4f6');
+    this.setWeapon({ form: 'sword', color: '#d9dde2', metal: 'iron' });
     this.textures = {
       townFloor: stoneTexture('floor'),
       townWall: stoneTexture('wall'),
@@ -119,53 +121,62 @@ export class WorldView {
     return group;
   }
 
-  setWeapon(form, color) {
-    this.form = form || 'sword';
-    while (this.weapon.children.length) {
-      const c = this.weapon.children.pop();
-      c.geometry?.dispose();
-      c.material?.dispose();
-    }
-    const mat = new THREE.MeshStandardMaterial({
-      color: form === 'sword' || form === 'spear' || form === 'axe' ? '#e6e2da' : color || '#f4f4f4',
-      metalness: form === 'staff' ? 0.1 : 0.72,
-      roughness: 0.22,
-      emissive: form === 'staff' ? color || '#d5ecc4' : '#000000',
-      emissiveIntensity: form === 'staff' ? 0.35 : 0,
+  surfaced(canvas, opts = {}) {
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+    return new THREE.MeshStandardMaterial({
+      map,
+      color: opts.color || '#ffffff',
+      metalness: opts.metalness ?? 0.55,
+      roughness: opts.roughness ?? 0.38,
+      emissive: opts.emissive || '#000000',
+      emissiveIntensity: opts.emissiveIntensity || 0,
     });
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, 0.16, 0.05),
-      new THREE.MeshStandardMaterial({ color: 0x6b4428, roughness: 0.8 }),
-    );
+  }
+
+  setWeapon(def) {
+    const form = def?.form || 'sword';
+    const tint = def?.color || '#f4f4f6';
+    while (this.weapon.children.length) {
+      const child = this.weapon.children.pop();
+      child.geometry?.dispose();
+      child.material?.dispose();
+    }
+    const metal = this.surfaced(metalCanvas(def?.metal || 'iron', tint), {
+      metalness: form === 'staff' ? 0.12 : def?.metal === 'rust' ? 0.35 : 0.72,
+      roughness: def?.metal === 'rust' || def?.metal === 'bone' ? 0.68 : 0.28,
+      emissive: def?.element ? tint : '#000000',
+      emissiveIntensity: def?.element ? 0.28 : 0,
+    });
+    const wood = this.surfaced(woodCanvas(), { metalness: 0.05, roughness: 0.86, color: '#c4a07a' });
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.05), wood);
     this.weapon.add(grip);
     if (form === 'spear') {
-      const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.15, 0.04), mat);
+      const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.15, 0.045), wood);
       shaft.position.set(0, 0.55, -0.15);
       shaft.rotation.x = 0.5;
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.22, 6), mat);
-      tip.position.set(0, 1.15, -0.42);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.28, 6), metal);
+      tip.position.set(0, 1.18, -0.46);
       tip.rotation.x = 0.5;
       this.weapon.add(shaft, tip);
     } else if (form === 'axe') {
-      const haft = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.7, 0.05), new THREE.MeshStandardMaterial({ color: 0x6b4428 }));
+      const haft = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.72, 0.055), wood);
       haft.position.y = 0.35;
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.06), mat);
-      head.position.set(0.12, 0.72, 0);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.24, 0.07), metal);
+      head.position.set(0.14, 0.74, 0);
       this.weapon.add(haft, head);
     } else if (form === 'staff') {
-      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 1.05, 8), mat);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.05, 8), wood);
       shaft.position.y = 0.45;
-      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), mat);
-      orb.position.y = 1.02;
+      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 12), metal);
+      orb.position.y = 1.05;
       this.weapon.add(shaft, orb);
     } else {
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.78, 0.014), mat);
-      blade.position.y = 0.5;
-      const guard = new THREE.Mesh(
-        new THREE.BoxGeometry(0.2, 0.03, 0.05),
-        new THREE.MeshStandardMaterial({ color: 0xd7c07a, metalness: 0.4, roughness: 0.35 }),
-      );
-      guard.position.y = 0.1;
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.82, 0.02), metal);
+      blade.position.y = 0.52;
+      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.035, 0.05), metal);
+      guard.position.y = 0.12;
       this.weapon.add(blade, guard);
     }
     this.weapon.position.set(0.42, -0.36, -0.55);
@@ -246,31 +257,37 @@ export class WorldView {
     this.root.add(mesh);
   }
 
+  addPortrait(group, id, y, w, h) {
+    const tex = new THREE.CanvasTexture(portraitCanvas(id));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    sprite.position.y = y;
+    sprite.scale.set(w, h, 1);
+    group.add(sprite);
+  }
+
   addMarker(poi) {
     const group = new THREE.Group();
     group.position.set((poi.x + 0.5) * CELL, (poi.z || 0) * STORY, (poi.y + 0.5) * CELL);
-    const colors = { shop: 0xc4864a, auction: 0x8e6bb5, leaderboard: 0xd7c07a, pk: 0xc4473a, party: 0x6ea37a, dungeon: 0x6ea4b8, warden: 0x6ea4b8, forge: 0xe07a3d };
+    const colors = { shop: 0xc4864a, auction: 0x8e6bb5, leaderboard: 0xd7c07a, pk: 0xc4473a, forge: 0xe07a3d, warden: 0x6ea4b8 };
     const color = colors[poi.kind] || 0xdddddd;
-    if (poi.kind === 'warden' || poi.kind === 'forge' || poi.kind === 'dungeon' || poi.kind === 'party') {
-      const mat = new THREE.MeshStandardMaterial({ color });
-      const left = new THREE.Mesh(new THREE.BoxGeometry(0.28, 2.4, 0.28), mat);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+    if (poi.kind === 'warden') {
+      const left = new THREE.Mesh(new THREE.BoxGeometry(0.28, 2.6, 0.28), mat);
       const right = left.clone();
-      left.position.set(-0.9, 1.2, 0);
-      right.position.set(0.9, 1.2, 0);
-      const lintel = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.28, 0.28), mat);
-      lintel.position.y = 2.45;
+      left.position.set(-1.05, 1.3, 0);
+      right.position.set(1.05, 1.3, 0);
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.28, 0.28), mat);
+      lintel.position.y = 2.65;
       group.add(left, right, lintel);
-      const skin = new THREE.MeshStandardMaterial({ color: poi.kind === 'forge' ? 0xc4864a : 0xe6d2b0 });
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.62, 4, 8), skin);
-      body.position.set(0, 0.95, 0.35);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), skin);
-      head.position.set(0, 1.55, 0.35);
-      group.add(body, head);
     } else {
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.7, 4, 8), new THREE.MeshStandardMaterial({ color }));
-      body.position.y = 1.05;
-      group.add(body);
+      const stall = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.7, 0.7), mat);
+      stall.position.set(0, 0.45, 0.15);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, 1.1), mat);
+      roof.position.set(0, 2.15, 0);
+      group.add(stall, roof);
     }
+    this.addPortrait(group, poi.kind, 1.15, 1.55, 1.95);
     group.add(this.makeLabel(poi.name));
     this.root.add(group);
   }
@@ -332,6 +349,7 @@ export class WorldView {
     );
     body.position.y = m.boss ? 1.25 : 1;
     group.add(body);
+    this.addPortrait(group, `foe-${m.element}${m.boss ? '-boss' : ''}`, m.boss ? 1.45 : 1.2, m.boss ? 1.35 : 1.05, m.boss ? 1.7 : 1.35);
     group.position.set((m.x + 0.5) * CELL, m.z * STORY, (m.y + 0.5) * CELL);
     this.root.add(group);
     this.monsters.set(m.id, group);

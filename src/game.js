@@ -1,4 +1,4 @@
-import { DUNGEONS, ITEMS, itemDef, itemStats, elementName, SHOP_TABS, CAMPFIRE_PRICE, equippedWeapon, combatPower, MERCENARIES, GENESIS_LISTINGS, ELEMENT_COLOR, MODE_NAME, canStack, fusePair, COLS, ROWS } from './data.js';
+import { DUNGEONS, ITEMS, itemDef, itemStats, statLines, elementName, SHOP_TABS, CAMPFIRE_PRICE, equippedWeapon, combatPower, MERCENARIES, GENESIS_LISTINGS, ELEMENT_COLOR, MODE_NAME, canStack, fusePair, COLS, ROWS } from './data.js';
 import { CELL, STORY, buildTown, buildDungeonFloor, bfs3, standBeside, hashSeed, isFloor } from './gen.js';
 import { autoPlace, canPlace, resolveFight, gainXp, tickBuffs } from './resolve.js';
 import { loadSave, saveSave, pushRecord, loadLog, newId, loadBook, saveBook } from './ledger.js';
@@ -6,6 +6,7 @@ import { createParty } from './party.js';
 import { startCampfire, stopCampfire } from './fire.js';
 import { WorldView, yawToward } from './view.js';
 import { fillBag } from './bag.js';
+import { portraitURL, itemIconURL } from './icons.js';
 
 function loadoutKey(player) {
   const w = equippedWeapon(player);
@@ -145,24 +146,26 @@ export class Game {
     this.root.querySelector('#wallet').textContent = `${p.name} Lv${p.level}  金${p.gold}  篝火${p.fires}  ${weapon ? weapon.def.name : '空手'}  技${elementName(itemDef(p.skillId)?.element)}  档${tx}`;
     const buttons = this.map?.kind === 'dungeon'
       ? [
-          ['开战', () => this.pull()],
-          ['连续战斗', () => this.exploreAll()],
-          ['停止', () => this.stopAuto()],
-          ['上楼', () => this.busy ? this.toast('先把这一场结算完') : this.climbExit()],
-          ['回城', () => this.busy ? this.toast('先把这一场结算完') : this.enterTown(true)],
+          ['装备', () => this.busy ? this.toast('先把这一场结算完') : this.openGear(), 'player'],
+          ['开战', () => this.pull(), 'pk'],
+          ['连续战斗', () => this.exploreAll(), 'haul'],
+          ['停止', () => this.stopAuto(), 'player'],
+          ['上楼', () => this.busy ? this.toast('先把这一场结算完') : this.climbExit(), 'climb'],
+          ['回城', () => this.busy ? this.toast('先把这一场结算完') : this.enterTown(true), 'warden'],
         ]
       : [
-          ['商店', () => this.goPoi('shop')],
-          ['熔炉', () => this.goPoi('forge')],
-          ['拍卖', () => this.goPoi('auction')],
-          ['入口', () => this.goPoi('gate')],
-          ['排行', () => this.goPoi('board')],
-          ['决斗', () => this.goPoi('arena')],
+          ['装备', () => this.openGear(), 'player'],
+          ['商店', () => this.goPoi('shop'), 'shop'],
+          ['熔炉', () => this.goPoi('forge'), 'forge'],
+          ['拍卖', () => this.goPoi('auction'), 'auction'],
+          ['入口', () => this.goPoi('gate'), 'warden'],
+          ['排行', () => this.goPoi('board'), 'leaderboard'],
+          ['决斗', () => this.goPoi('arena'), 'pk'],
         ];
     this.hud.innerHTML = '';
-    for (const [label, fn] of buttons) {
+    for (const [label, fn, icon] of buttons) {
       const b = document.createElement('button');
-      b.textContent = label;
+      b.innerHTML = `<img src="${portraitURL(icon)}" alt="">${label}`;
       b.onclick = () => fn();
       this.hud.appendChild(b);
     }
@@ -196,7 +199,7 @@ export class Game {
 
   syncWeapon() {
     const w = equippedWeapon(this.player);
-    this.view.setWeapon(w?.def.form || 'sword', w?.def.color || '#f4f4f6');
+    this.view.setWeapon(w?.def || { form: 'sword', color: '#d9dde2', metal: 'iron' });
   }
 
   placeAt(cell, yaw) {
@@ -222,18 +225,27 @@ export class Game {
   }
 
   enterFloor(dungeon, floor) {
-    const stamp = dungeon.mode === 'daily' ? new Date().toISOString().slice(0, 10) : (this.party.codeRoom || 'solo');
-    const seed = hashSeed(`${dungeon.id}:${floor}:${stamp}`);
-    this.map = buildDungeonFloor(dungeon, floor, seed);
-    if (dungeon.mode === 'raid' && this.allies.length) {
-      const scale = 1 + this.allies.length * 0.45;
-      for (const m of this.map.monsters) m.hp = Math.round(m.hp * scale);
+    if (!dungeon?.id) return this.toast('这扇门没有定下通往哪里');
+    try {
+      const stamp = dungeon.mode === 'daily' ? new Date().toISOString().slice(0, 10) : (this.party.codeRoom || 'solo');
+      const seed = hashSeed(`${dungeon.id}:${floor}:${stamp}`);
+      this.map = buildDungeonFloor(dungeon, floor, seed);
+      if (!this.map?.spawn || !this.map.monsters?.length) throw new Error('这一层没有生成出来');
+      if (dungeon.mode === 'raid' && this.allies.length) {
+        const scale = 1 + this.allies.length * 0.45;
+        for (const m of this.map.monsters) m.hp = Math.round(m.hp * scale);
+      }
+      this.placeAt(this.map.spawn, 0);
+      this.view.setWorld(this.map, { monsters: this.map.monsters, exitOpen: false });
+      this.syncWeapon();
+      this.closePanel();
+      this.refreshHud();
+      this.toast(`${dungeon.name} 第 ${floor} 层，点开战`);
+    } catch (err) {
+      this.enterTown(false);
+      this.toast(`没能进去：${err.message || err}`);
+      return;
     }
-    this.placeAt(this.map.spawn, 0);
-    this.view.setWorld(this.map, { monsters: this.map.monsters, exitOpen: false });
-    this.closePanel();
-    this.refreshHud();
-    this.toast(`${dungeon.name} 第 ${floor} 层`);
     this.snap('enter', { dungeon: dungeon.id, floor });
   }
 
@@ -264,10 +276,16 @@ export class Game {
   }
 
   openPanel(html, opts = {}) {
-    this.panel.innerHTML = html;
+    const face = opts.face ? `<img class="face" alt="" src="${portraitURL(opts.face)}">` : '';
+    this.panel.innerHTML = `<div class="panel-top">${face}<button type="button" id="panel-x" aria-label="关闭">×</button></div>${html}`;
     this.panel.classList.add('open');
     this.panel.classList.toggle('wide', !!opts.wide);
     this.panel.dataset.kind = opts.kind || '';
+    this.panel.querySelector('#panel-x').onclick = (ev) => {
+      ev.stopPropagation();
+      if (this.pendingSettle) this.pendingSettle();
+      else this.closePanel();
+    };
   }
 
   tick(dt) {
@@ -440,7 +458,7 @@ export class Game {
     for (const sw of preview.swings) {
       if (sw.side === 'player') await this.view.swing();
       else await this.view.lunge(monster.id);
-      this.float(sw.side === 'player' ? `${sw.dmg}` : `-${sw.dmg}`);
+      this.float(sw.side === 'player' ? (sw.crit ? `暴${sw.dmg}` : `${sw.dmg}`) : `-${sw.dmg}`);
     }
     if (preview.win) {
       monster.dead = true;
@@ -529,7 +547,7 @@ export class Game {
           </div>
           <div id="firebox" class="flame-wrap" style="display:none"><canvas id="flame" width="400" height="180"></canvas><p class="note">篝火声：CC0 Fire Crackling，AntumDeluge，OpenGameArt。休息时可吃药。</p><div class="row" id="brews"></div></div>
           <h2>换装</h2>
-          <div id="gear"></div>`);
+          <div id="gear"></div>`, { face: `foe-${monster.element}${monster.boss ? '-boss' : ''}` });
         const field = this.panel.querySelector('#loot');
         drops.forEach((d, i) => {
           const card = document.createElement('div');
@@ -537,7 +555,7 @@ export class Game {
           card.style.left = `${16 + (i % 4) * 90}px`;
           card.style.top = `${24 + Math.floor(i / 4) * 70}px`;
           const def = itemDef(d.itemId);
-          card.textContent = def.name;
+          card.innerHTML = `<img src="${itemIconURL(d.itemId)}" alt="">${def.name}`;
           card.style.background = def.color;
           field.appendChild(card);
           d.el = card;
@@ -567,18 +585,24 @@ export class Game {
     return new Promise((resolve) => {
       this.auto = false;
       this.bagMode = 'use';
+      let settled = false;
+      const finish = (again) => {
+        if (settled) return;
+        settled = true;
+        this.pendingSettle = null;
+        if (again) this.queuePull = true;
+        this.closePanel();
+        resolve({});
+      };
+      this.pendingSettle = () => finish(false);
       this.openPanel(`
         <h2>被击退</h2>
         <p class="note">${monster.name}（${elementName(monster.element)}）把你逼退了。你还在这一层。右键旋转，拖到相同的一件上升级。</p>
         <div class="row"><button id="rest" ${this.player.fires >= restCost ? '' : 'disabled'}>休息</button><button id="go">再战</button></div>
         <div id="firebox" class="flame-wrap" style="display:none"><canvas id="flame" width="400" height="180"></canvas><div class="row" id="brews"></div></div>
-        <div id="gear"></div>`);
+        <div id="gear"></div>`, { face: `foe-${monster.element}${monster.boss ? '-boss' : ''}` });
       this.mountGear(this.panel.querySelector('#gear'));
-      this.panel.querySelector('#go').onclick = () => {
-        this.queuePull = true;
-        this.closePanel();
-        resolve({});
-      };
+      this.panel.querySelector('#go').onclick = () => finish(true);
       this.panel.querySelector('#rest').onclick = () => this.restInside(() => {});
     });
   }
@@ -617,12 +641,33 @@ export class Game {
 
   mountGear(host) {
     if (!host) return;
-    fillBag(host, this.player.bag, this.player.runes, {
+    const focus = this.player.bag.find((b) => b.uid === this.inspect) || equippedWeapon(this.player);
+    host.innerHTML = `<div class="equip"><aside class="detail">${this.detailHTML(focus)}</aside><div class="cells"></div></div>`;
+    fillBag(host.querySelector('.cells'), this.player.bag, this.player.runes, {
       selected: this.forgePicks,
       onRotate: (it) => this.rotateItem(it, () => this.mountGear(host)),
       onDrop: (it, x, y) => this.dropItem(it, x, y, () => this.mountGear(host)),
-      onClick: (it) => this.clickItem(it, () => this.mountGear(host)),
+      onClick: (it) => {
+        this.inspect = it.uid;
+        this.clickItem(it, () => this.mountGear(host));
+      },
     });
+  }
+
+  detailHTML(it) {
+    const power = combatPower(this.player);
+    const total = `<p class="note">身上合计 攻${power.atk} 防${power.def} 暴击${power.crit}% 穿透${power.pierce} 速度${power.speed} 生命${power.maxHp}</p>`;
+    if (!it) return `<p class="note">点一件装备，属性会写在这里。</p>${total}`;
+    const d = itemStats(it);
+    const lines = statLines(it, this.player).map((line) => `<li>${line}</li>`).join('');
+    const src = itemIconURL(it.itemId);
+    return `<img src="${src}" alt=""><b>${d.name}</b><ul>${lines}</ul>${total}`;
+  }
+
+  openGear() {
+    this.bagMode = 'use';
+    this.openPanel(`<h2>装备</h2><p class="note">左边是这件东西的属性和材质，右边是格子。武器要点一下才拿在手上。砺石挨着武器、角甲放四角、边符靠边上，合计才会变。</p><div id="gear"></div>`, { wide: true, kind: 'gear', face: 'player' });
+    this.mountGear(this.panel.querySelector('#gear'));
   }
 
   rotateItem(it, redraw) {
@@ -729,7 +774,9 @@ export class Game {
     }).catch((err) => {
       this.txState = '失败';
       this.refreshHud();
-      this.toast(String(err.message || err).slice(0, 90));
+      const msg = String(err?.message || err);
+      if (why === 'enter') this.toast(msg.includes('process') ? '人已经在层里。上传环境缺 process，档没传上' : '人已经在层里，档没传上');
+      else this.toast(msg.slice(0, 90));
     });
   }
 
@@ -842,7 +889,7 @@ export class Game {
           <p class="note">点货架买下。点背包里的东西卖出一半价钱。右键旋转。</p>
           <div id="bag"></div>
         </div>
-      </div>`, { wide: true, kind: 'shop' });
+      </div>`, { wide: true, kind: 'shop', face: 'shop' });
     const shelf = [];
     for (const id of ids) {
       const d = itemDef(id);
@@ -959,44 +1006,77 @@ export class Game {
 
   openAuction() {
     this.bagMode = 'ask';
+    this.ahCat = this.ahCat || 'all';
+    this.ahQuery = this.ahQuery || '';
     const book = this.book();
-    const options = Object.keys(ITEMS).map((id) => `<option value="${id}">${ITEMS[id].name}</option>`).join('');
-    const asks = book.asks.map((row) => `<div class="ask">${itemStats(row).name} ${row.price}金 ${row.seller} <button data-cancel-ask="${row.id}">撤</button></div>`).join('') || '<div>没有卖单</div>';
-    const bids = book.bids.map((row) => `<div class="bid">${itemDef(row.itemId).name} ${row.price}金 ${row.buyer} <button data-cancel-bid="${row.id}">撤</button></div>`).join('') || '<div>没有买单</div>';
+    const cats = [['all', '全部'], ['weapon', '武器'], ['armor', '防具'], ['trinket', '首饰'], ['skill', '技能'], ['potion', '消耗品'], ['material', '材料']];
+    const catOf = (kind) => (kind === 'brew' ? 'potion' : kind === 'tome' ? 'material' : kind);
+    const q = this.ahQuery.trim();
+    const rows = book.asks
+      .map((ask) => ({ ask, d: itemStats(ask) }))
+      .filter(({ d }) => d && (this.ahCat === 'all' || catOf(d.kind) === this.ahCat))
+      .filter(({ d }) => !q || d.name.includes(q))
+      .sort((a, b) => a.ask.price - b.ask.price);
+    const catButtons = cats.map(([id, name]) => `<button type="button" data-cat="${id}" class="${this.ahCat === id ? 'on' : ''}">${name}</button>`).join('');
+    const table = rows.map(({ ask, d }) => {
+      const swatch = itemIconURL(ask.itemId);
+      const attr = statLines(ask).slice(0, 3).join(' ');
+      const mine = ask.seller === this.player.name;
+      return `<tr>
+        <td><img src="${swatch}" alt=""></td>
+        <td><b>${d.name}</b></td>
+        <td>${attr || elementName(d.element)}</td>
+        <td>${ask.seller}</td>
+        <td class="price">${ask.price}</td>
+        <td>${mine ? `<button type="button" data-cancel-ask="${ask.id}">撤单</button>` : `<button type="button" data-buy-ask="${ask.id}">购买</button>`}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6">这个分类没有在售的东西</td></tr>';
+    const options = Object.keys(ITEMS)
+      .filter((id) => this.ahCat === 'all' || catOf(ITEMS[id].kind) === this.ahCat)
+      .map((id) => `<option value="${id}">${ITEMS[id].name}</option>`).join('');
+    const bids = book.bids
+      .filter((bid) => this.ahCat === 'all' || catOf(itemDef(bid.itemId)?.kind) === this.ahCat)
+      .map((bid) => `<div class="bid">${itemDef(bid.itemId).name} 出价 ${bid.price} ${bid.buyer} ${bid.buyer === this.player.name ? `<button type="button" data-cancel-bid="${bid.id}">撤</button>` : ''}</div>`)
+      .join('') || '<div class="note">没有竞价</div>';
     this.openPanel(`
       <h2>拍卖行</h2>
-      <div class="split">
-        <div>
-          <h2>卖单货架</h2>
-          <div id="shelf"></div>
-        </div>
-        <div>
-          <h2>背包</h2>
-          <div class="row"><input id="price" type="number" min="1" value="20" style="width:80px" /><span class="note">点背包按这个价挂卖</span></div>
+      <div class="dnf">
+        <aside class="cats">${catButtons}</aside>
+        <section>
+          <div class="row"><input id="q" placeholder="搜索，回车" /><span>持有 ${this.player.gold} 金</span></div>
+          <table class="ah"><tr><th></th><th>物品</th><th>属性</th><th>卖家</th><th>一口价</th><th></th></tr>${table}</table>
+          <h2>竞价</h2>
+          <div class="bids">${bids}</div>
+        </section>
+        <aside>
+          <h2>登记出售</h2>
+          <p class="note">点背包里的装备，按下面的价挂一口价。别人的出价不低于这个价会立刻成交。</p>
           <div id="bag"></div>
-          <div class="row"><select id="bid-item">${options}</select><input id="bid-price" type="number" min="1" value="30" style="width:80px" /><button id="bid">挂买</button><button id="leave">离开</button></div>
-        </div>
-      </div>
-      <div class="book"><div><h2>卖单</h2>${asks}</div><div><h2>买单</h2>${bids}</div></div>`, { wide: true, kind: 'auction' });
-    const shelf = [];
-    for (const ask of book.asks) {
-      const d = itemDef(ask.itemId);
-      const placed = autoPlace(shelf, { ...ask, uid: ask.id, w: ask.w || d.w, h: ask.h || d.h, price: ask.price }, 8);
-      if (placed) shelf.push(placed);
-    }
-    fillBag(this.panel.querySelector('#shelf'), shelf, [], {
-      rows: 8,
-      onClick: (it) => this.buyAsk(book.asks.find((a) => a.id === it.uid)),
-    });
+          <div class="row"><input id="price" type="number" min="1" value="20" style="width:88px" /><span>金</span></div>
+          <div class="row"><select id="bid-item">${options}</select><input id="bid-price" type="number" min="1" value="30" style="width:88px" /><button type="button" id="bid">竞价</button></div>
+        </aside>
+      </div>`, { wide: true, kind: 'auction', face: 'auction' });
     this.mountGear(this.panel.querySelector('#bag'));
-    this.panel.querySelector('#bid').onclick = () => this.placeBid();
-    this.panel.querySelector('#leave').onclick = () => this.closePanel();
-    this.panel.querySelectorAll('[data-cancel-bid]').forEach((btn) => {
-      btn.onclick = () => this.cancelBid(btn.dataset.cancelBid);
+    const qbox = this.panel.querySelector('#q');
+    qbox.value = this.ahQuery;
+    qbox.onkeydown = (ev) => {
+      if (ev.key !== 'Enter') return;
+      this.ahQuery = qbox.value;
+      this.openAuction();
+    };
+    this.panel.querySelectorAll('[data-cat]').forEach((btn) => {
+      btn.onclick = () => { this.ahCat = btn.dataset.cat; this.openAuction(); };
+    });
+    this.panel.querySelectorAll('[data-buy-ask]').forEach((btn) => {
+      btn.onclick = () => this.buyAsk(book.asks.find((a) => a.id === btn.dataset.buyAsk));
     });
     this.panel.querySelectorAll('[data-cancel-ask]').forEach((btn) => {
       btn.onclick = () => this.cancelAsk(btn.dataset.cancelAsk);
     });
+    this.panel.querySelectorAll('[data-cancel-bid]').forEach((btn) => {
+      btn.onclick = () => this.cancelBid(btn.dataset.cancelBid);
+    });
+    this.panel.querySelector('#bid').onclick = () => this.placeBid();
   }
 
   buyAsk(ask) {
@@ -1052,7 +1132,7 @@ export class Game {
       <p class="note">点两件不同的，熔成一件，花 10 金。母件留下形状和种类，子件的攻击、防御和属性折半叠上去。相同的两件不要熔，拖到一起，最高 +10。角甲要放在四角，边符要靠边上，砺石挨着武器才生效。同属性两件以上额外 +2 攻击。守层者会在格子上落符。</p>
       <div id="bag"></div>
       <p id="pick">先点两件不同的</p>
-      <div class="row"><button id="fuse">熔合</button><button id="leave">离开</button></div>`, { wide: true, kind: 'forge' });
+      <div class="row"><button id="fuse">熔合</button><button id="leave">离开</button></div>`, { wide: true, kind: 'forge', face: 'forge' });
     this.mountGear(this.panel.querySelector('#bag'));
     this.panel.querySelector('#fuse').onclick = () => this.fuseSelected();
     this.panel.querySelector('#leave').onclick = () => { this.forgePicks = []; this.closePanel(); };
@@ -1080,7 +1160,7 @@ export class Game {
   openBoard() {
     const rows = this.rankRows().map((r, i) => `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.deepest}</td><td>${r.bosses || 0}</td><td>${r.pk}</td></tr>`).join('');
     const tx = localStorage.getItem('gm-tx-v1') || '';
-    this.openPanel(`<h2>排行榜</h2><table><tr><th>#</th><th>名字</th><th>层数</th><th>守层</th><th>决斗</th></tr>${rows}</table><p class="note">杀一只、换一次装、进一层，各上传一整份档。浏览器留最近一份，是为了刷新后马上接着打，不用等交易确认。最近档号 ${tx || '还没有'}。</p><div class="row"><input id="txid" placeholder="档号" style="width:220px" /><button id="load-tx">按档号继续</button></div>`);
+    this.openPanel(`<h2>排行榜</h2><table><tr><th>#</th><th>名字</th><th>层数</th><th>守层</th><th>决斗</th></tr>${rows}</table><p class="note">杀一只、换一次装、进一层，各上传一整份档。浏览器留最近一份，是为了刷新后马上接着打，不用等交易确认。最近档号 ${tx || '还没有'}。</p><div class="row"><input id="txid" placeholder="档号" style="width:220px" /><button id="load-tx">按档号继续</button></div>`, { face: 'leaderboard' });
     this.panel.querySelector('#load-tx').onclick = () => this.restoreTx();
     this.paintBoard();
   }
@@ -1107,7 +1187,7 @@ export class Game {
     const cards = DUNGEONS.map((d) => {
       const floors = d.mode === 'haul' ? '不封顶' : `${d.floors}层`;
       const locked = this.player.level < d.min;
-      return `<button class="card" data-gate="${d.id}" ${locked ? 'disabled' : ''}><b>${d.name}</b>${MODE_NAME[d.mode]} · ${elementName(d.element)}气 · ${floors} · ${d.heights}楼高<br>${d.blurb}<br>需要 Lv${d.min}</button>`;
+      return `<button class="card" data-gate="${d.id}" ${locked ? 'disabled' : ''}><img src="${portraitURL(d.id)}" alt=""><span><b>${d.name}</b>${MODE_NAME[d.mode]} · ${elementName(d.element)}气 · ${floors} · ${d.heights}楼高<br>${d.blurb}<br>需要 Lv${d.min}</span></button>`;
     }).join('');
     this.openPanel(`
       <h2>守门人</h2>
@@ -1116,7 +1196,7 @@ export class Game {
       <h2>队伍</h2>
       <p class="note">同一浏览器再开一个标签，用房间码加入。没有人时可以带佣兵。</p>
       <div class="row"><button id="host">开房</button><input id="code" placeholder="房间码" style="width:90px" /><button id="join">加入</button><button id="merc">带两名佣兵</button><button id="leave">离开</button></div>
-      <div id="members"></div>`, { wide: true, kind: 'gate' });
+      <div id="members"></div>`, { wide: true, kind: 'gate', face: 'warden' });
     this.panel.querySelectorAll('[data-gate]').forEach((btn) => {
       btn.onclick = () => {
         const dungeon = DUNGEONS.find((d) => d.id === btn.dataset.gate);
@@ -1126,8 +1206,8 @@ export class Game {
     });
     this.panel.querySelector('#leave').onclick = () => this.closePanel();
     const show = () => {
-      this.panel.querySelector('#members').textContent = this.allies.length
-        ? this.allies.map((a) => `${a.name}·${elementName(a.element)}`).join('，')
+      this.panel.querySelector('#members').innerHTML = this.allies.length
+        ? this.allies.map((a) => `<span class="who"><img src="${portraitURL(a.id)}" alt="">${a.name}</span>`).join('')
         : '还没有队友';
     };
     show();
@@ -1153,10 +1233,10 @@ export class Game {
   }
 
   openParty() {
-    this.openPanel(`<h2>团本</h2><p class="note">同一浏览器再开一个标签，用房间码加入。加入者的属性和攻击会算进每一次结算。没有人时可以带佣兵。</p><div class="row"><button id="host">开房</button><input id="code" placeholder="房间码" style="width:90px" /><button id="join">加入</button><button id="merc">带两名佣兵</button></div><div id="members"></div>`);
+    this.openPanel(`<h2>团本</h2><p class="note">同一浏览器再开一个标签，用房间码加入。加入者的属性和攻击会算进每一次结算。没有人时可以带佣兵。</p><div class="row"><button id="host">开房</button><input id="code" placeholder="房间码" style="width:90px" /><button id="join">加入</button><button id="merc">带两名佣兵</button></div><div id="members"></div>`, { face: 'warden' });
     const show = () => {
-      this.panel.querySelector('#members').textContent = this.allies.length
-        ? this.allies.map((a) => `${a.name}·${elementName(a.element)}`).join('，')
+      this.panel.querySelector('#members').innerHTML = this.allies.length
+        ? this.allies.map((a) => `<span class="who"><img src="${portraitURL(a.id)}" alt="">${a.name}</span>`).join('')
         : '还没有队友';
     };
     show();
@@ -1189,8 +1269,8 @@ export class Game {
   }
 
   openPk() {
-    const foes = MERCENARIES.map((m) => `<button data-pk="${m.id}">${m.name} · ${elementName(m.element)} · ${m.pk}</button>`).join('');
-    this.openPanel(`<h2>组队决斗</h2><p class="note">你和当前队伍打对方一队。一场只结算一次。</p><div class="row">${foes}</div>`);
+    const foes = MERCENARIES.map((m) => `<button data-pk="${m.id}"><img src="${portraitURL(m.id)}" alt="">${m.name} · ${elementName(m.element)} · ${m.pk}</button>`).join('');
+    this.openPanel(`<h2>组队决斗</h2><p class="note">你和当前队伍打对方一队。一场只结算一次。</p><div class="row">${foes}</div>`, { face: 'pk' });
     this.panel.querySelectorAll('[data-pk]').forEach((btn) => {
       btn.onclick = () => this.teamPk(btn.dataset.pk);
     });

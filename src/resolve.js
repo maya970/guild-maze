@@ -91,10 +91,13 @@ export function resolveFight(player, monster, rng, allies) {
   let mhp = monster.hp;
   const swings = [];
   while (php > 0 && mhp > 0 && swings.length < 24) {
-    const raw = Math.max(1, power.atk + allyAtk - monster.def + Math.floor(rng() * 3) - 1);
-    const dmg = Math.max(1, Math.round(raw * rel.mul));
+    const guard = Math.max(0, monster.def - (power.pierce || 0));
+    const raw = Math.max(1, power.atk + allyAtk - guard + Math.floor(rng() * 3) - 1);
+    let dmg = Math.max(1, Math.round(raw * rel.mul * (1 + (power.speed || 0) * 0.04)));
+    const crit = (power.crit || 0) > 0 && rng() * 100 < power.crit;
+    if (crit) dmg = Math.round(dmg * 1.5);
     mhp -= dmg;
-    swings.push({ side: 'player', dmg, php, mhp: Math.max(0, mhp), element: rel.el, relation: rel.relation });
+    swings.push({ side: 'player', dmg, crit, php, mhp: Math.max(0, mhp), element: rel.el, relation: rel.relation });
     if (mhp <= 0) break;
     const back = Math.max(1, monster.atk - power.def + Math.floor(rng() * 3) - 1);
     php -= back;

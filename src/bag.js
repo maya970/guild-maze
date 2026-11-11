@@ -1,19 +1,7 @@
 import { itemStats } from './data.js';
+import { itemIconURL } from './icons.js';
 
 const CELL = 42;
-
-function glyph(d) {
-  if (d.form === 'sword') return '刃';
-  if (d.form === 'spear') return '矛';
-  if (d.form === 'axe') return '斧';
-  if (d.form === 'staff') return '杖';
-  if (d.kind === 'armor') return '甲';
-  if (d.kind === 'potion' || d.kind === 'brew') return '药';
-  if (d.kind === 'skill') return '技';
-  if (d.kind === 'material') return '料';
-  if (d.kind === 'tome') return '页';
-  return '符';
-}
 
 export function fillBag(host, bag, runes, api) {
   const rows = api.rows || 6;
@@ -39,9 +27,8 @@ export function fillBag(host, bag, runes, api) {
     node.style.top = `${it.y * CELL}px`;
     node.style.width = `${it.w * CELL - 4}px`;
     node.style.height = `${it.h * CELL - 4}px`;
-    node.style.background = d.color;
     node.title = d.name;
-    node.innerHTML = `<b>${glyph(d)}</b><span>${d.name}</span>${it.price ? `<em>${it.price}</em>` : ''}`;
+    node.innerHTML = `<img src="${itemIconURL(it.itemId)}" alt=""><span>${d.name}</span>${it.price ? `<em>${it.price}</em>` : ''}`;
     node.oncontextmenu = (ev) => {
       ev.preventDefault();
       api.onRotate?.(it);

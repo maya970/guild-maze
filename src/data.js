@@ -83,6 +83,28 @@ export const ITEMS = {
   plume: { name: '风羽', w: 1, h: 1, kind: 'material', element: 'wind', atk: 1, price: 8, color: '#d5ecc4' },
 };
 
+const AFFIX = {
+  rust_blade: { crit: 4, metal: 'rust' },
+  iron_blade: { crit: 6, pierce: 1, metal: 'iron' },
+  star_edge: { crit: 12, speed: 1, metal: 'star' },
+  canal_spear: { pierce: 4, speed: 1, metal: 'tide' },
+  tide_spear: { pierce: 6, speed: 2, metal: 'tide' },
+  bone_axe: { crit: 9, hp: 8, metal: 'bone' },
+  well_axe: { crit: 12, pierce: 3, metal: 'ember' },
+  wind_staff: { speed: 3, crit: 5, metal: 'wind' },
+  thunder_staff: { crit: 14, speed: 2, metal: 'thunder' },
+  oak_board: { hp: 10 },
+  mail_scrap: { hp: 16 },
+  tide_coat: { hp: 22, speed: 1 },
+  well_plate: { hp: 30 },
+  corner_plate: { hp: 18 },
+  charm: { crit: 3 },
+  fang: { pierce: 2 },
+  edge_charm: { speed: 1 },
+  grit: { crit: 1 },
+  echo: { speed: 1 },
+};
+
 const BY_TIER = {
   1: ['rust_blade', 'oak_board', 'vial', 'brew_water', 'charm', 'iron_chip', 'grit'],
   2: ['canal_spear', 'mail_scrap', 'flask', 'brew_earth', 'fang', 'wind_staff', 'bone_dust', 'echo'],
@@ -115,18 +137,56 @@ export function shopRows() {
 export function itemStats(it) {
   const base = itemDef(it?.itemId);
   if (!base) return null;
+  const extra = AFFIX[it.itemId] || {};
   const plus = it.plus || 0;
   const mul = 1 + plus * 0.12;
   const fuse = it.fuse || {};
   const name = fuse.name ? `${base.name}·${fuse.name}` : (plus ? `${base.name}+${plus}` : base.name);
   return {
     ...base,
+    ...extra,
     name,
     atk: Math.round(((base.atk || 0) + (fuse.atk || 0)) * mul),
     def: Math.round(((base.def || 0) + (fuse.def || 0)) * mul),
-    element: base.element || fuse.element || null,
+    crit: Math.round(((extra.crit || 0) + (fuse.crit || 0)) * mul),
+    pierce: (extra.pierce || 0) + (fuse.pierce || 0),
+    speed: (extra.speed || 0) + (fuse.speed || 0),
+    hp: (extra.hp || 0) + (fuse.hp || 0),
+    element: base.element || fuse.element || extra.element || null,
+    metal: extra.metal || base.metal || (base.kind === 'weapon' ? 'iron' : ''),
     plus,
   };
+}
+
+export function statLines(it, player) {
+  const d = itemStats(it);
+  if (!d) return [];
+  const lines = [];
+  if (d.atk) lines.push(`攻击 +${d.atk}`);
+  if (d.def) lines.push(`防御 +${d.def}`);
+  if (d.crit) lines.push(`暴击 ${d.crit}%`);
+  if (d.pierce) lines.push(`穿透 ${d.pierce}`);
+  if (d.speed) lines.push(`速度 ${d.speed}`);
+  if (d.hp) lines.push(`生命 +${d.hp}`);
+  if (d.element) lines.push(`${elementName(d.element)}属性`);
+  if (d.metal) lines.push(`材质 ${metalName(d.metal)}`);
+  if (player && d.place === 'corner') {
+    const on = (it.x === 0 || it.x + it.w === COLS) && (it.y === 0 || it.y + it.h === ROWS);
+    lines.push(on ? '角位生效' : '放到四角才有防御');
+  }
+  if (player && d.place === 'edge') {
+    const on = it.x === 0 || it.y === 0 || it.x + it.w === COLS || it.y + it.h === ROWS;
+    lines.push(on ? '边位生效' : '靠边上才有攻击');
+  }
+  if (player && d.adj) {
+    const n = orthogonal(player.bag, it).filter((other) => d.adj === 'any' || itemDef(other.itemId)?.kind === d.adj).length;
+    lines.push(d.adj === 'weapon' ? `相邻武器 ${n}，每个 +${d.adjAtk || 1} 攻击` : `相邻物品 ${n}，每个 +${d.adjAtk || 1} 攻击`);
+  }
+  return lines;
+}
+
+function metalName(id) {
+  return { rust: '锈铁', iron: '精铁', star: '星钢', tide: '潮铜', bone: '骨', ember: '炉钢', wind: '风木', thunder: '雷晶' }[id] || id;
 }
 
 export function canStack(a, b) {
@@ -184,6 +244,10 @@ export function equippedWeapon(player) {
 export function combatPower(player) {
   let atk = 4 + player.level + (player.tomeAtk || 0);
   let def = player.level;
+  let crit = 0;
+  let pierce = 0;
+  let speed = 0;
+  let hp = 0;
   const bag = player.bag || [];
   const elements = {};
   for (const it of bag) {
@@ -209,9 +273,13 @@ export function combatPower(player) {
     if (d.element) elements[d.element] = (elements[d.element] || 0) + 1;
     atk += addAtk;
     def += addDef;
+    crit += d.crit || 0;
+    pierce += d.pierce || 0;
+    speed += d.speed || 0;
+    hp += d.hp || 0;
   }
   if (Object.values(elements).some((n) => n >= 2)) atk += 2;
-  return { atk, def, maxHp: 28 + player.level * 8 };
+  return { atk, def, crit, pierce, speed, maxHp: 28 + player.level * 8 + hp };
 }
 
 export const MERCENARIES = [
